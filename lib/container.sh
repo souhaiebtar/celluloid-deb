@@ -197,7 +197,7 @@ ensure_build_image() {
   printf '%s' "$ref"
 }
 
-# build_in_container <engine> <image> <workroot> <outdir> <logfile> <deps_present:0|1>
+# build_in_container <engine> <image> <workroot> <outdir> <logfile> <deps_present:0|1> [backport_dir]
 #
 # Runs dpkg-buildpackage inside the container. The source tree is already laid
 # out as <workroot>/celluloid-<version> with a generated debian/ directory.
@@ -205,13 +205,22 @@ ensure_build_image() {
 # deps_present=1 means the image already contains the build dependencies, so
 # the apt steps are skipped entirely. That is the whole point of the cached
 # image: it removes the dominant cost of a build.
+#
+# backport_dir, when given, holds the private-prefix GTK/libadwaita packages.
+# They are installed inside the container so Celluloid 0.30 builds against GTK
+# 4.20 instead of the suite's own GTK, and the result is linked with an rpath so
+# it resolves them at runtime.
 build_in_container() {
   local engine=$1 image=$2 workroot=$3 outdir=$4 logfile=$5 deps_present=${6:-0}
-  local opts vol_work vol_out
+  local backport_dir=${7:-}
+  local opts vol_work vol_out vol_backports=""
 
   opts=$(_volume_opts "$engine")
   vol_work="$workroot:/workbuild$opts"
   vol_out="$outdir:/outbuild$opts"
+  if [[ -n "$backport_dir" ]]; then
+    vol_backports="$backport_dir:/backports:ro$opts"
+  fi
 
   # The inner script is intentionally explicit: no reliance on host state.
   # - dpkg-buildpackage runs as an unprivileged user inside the container
@@ -240,6 +249,16 @@ else
 fi
 
 echo "### building"
+# Install the private-prefix GTK/libadwaita backports when provided. They live
+# under /opt, so nothing here replaces a Debian-packaged library.
+if [ "${USE_BACKPORTS:-0}" = "1" ]; then
+  echo "### installing GTK/libadwaita backports"
+  dpkg -i /backports/*.deb || exit 1
+  export PKG_CONFIG_PATH=/opt/gtk420/lib/x86_64-linux-gnu/pkgconfig
+  echo "gtk4:       $(pkg-config --modversion gtk4)"
+  echo "libadwaita: $(pkg-config --modversion libadwaita-1)"
+fi
+
 # The stage directory holds exactly one celluloid-<version> tree. Find it
 # explicitly rather than relying on glob expansion, which breaks if a stale
 # tree from an earlier attempt is present.
@@ -249,6 +268,15 @@ if [ -z "$src" ]; then
   exit 1
 fi
 cd "$src" || exit 1
+
+# meson reads the link arguments from the generated debian/rules via
+# DH_OPTIONS-independent env: keeping it here means the packaging template does
+# not have to know whether backports are in play.
+if [ "${USE_BACKPORTS:-0}" = "1" ]; then
+  export DEB_LDFLAGS_MAINT_APPEND="-Wl,-rpath,/opt/gtk420/lib/x86_64-linux-gnu"
+  # Tells debian/rules to add the private prefix to the shlibdeps search path.
+  export USE_BACKPORTS=1
+fi
 dpkg-buildpackage -b -uc -us --no-pre-clean -j"$(nproc)" 2>&1 || exit 1
 
 echo "### collecting artifacts"
@@ -278,8 +306,12 @@ echo "### done"
     -e "HOST_GID=$(id -g)"
     -e "WITH_DBGSYM=${WITH_DBGSYM:-0}"
     -e "DEPS_PRESENT=$deps_present"
-    "$image" bash -c "$inner"
+    -e "USE_BACKPORTS=${backport_dir:+1}"
   )
+  if [[ -n "$vol_backports" ]]; then
+    run_args+=(-v "$vol_backports")
+  fi
+  run_args+=("$image" bash -c "$inner")
 
   if verbose; then
     "$engine" "${run_args[@]}" 2>&1 | tee -a "$logfile"

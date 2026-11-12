@@ -50,6 +50,23 @@ generate_debian_dir() {
   install -m 0644 "$src/source/format"  "$dest/debian/source/format"  || return 1
   install -m 0644 "$src/source/options" "$dest/debian/source/options" || return 1
 
+  # When the private-prefix backports are in use, the binary links GTK and
+  # libadwaita from /opt/gtk420. Those libraries have no shlibs database entry,
+  # so their package dependencies must be declared explicitly: one in
+  # debian/shlibs.local for dpkg-shlibdeps, one appended to Depends. Without
+  # both, dh_shlibdeps aborts with "no dependency information found".
+  if [[ "${BACKPORTS_AVAILABLE:-0}" == "1" ]]; then
+    cat > "$dest/debian/shlibs.local" <<'SL'
+libgtk-4 1 libgtk-4-1-backport (>= 4.20)
+libadwaita-1 0 libadwaita-1-0-backport (>= 1.8)
+SL
+    chmod 0644 "$dest/debian/shlibs.local"
+
+    # Append the backport packages to the binary's Depends list.
+    sed -i 's|^         ${shlibs:Depends},$|         ${shlibs:Depends},\n         libgtk-4-1-backport,\n         libadwaita-1-0-backport,|' \
+      "$dest/debian/control"
+  fi
+
   # empty patch series, so patches can be added later without a format change
   install -m 0644 "$src/patches/series" "$dest/debian/patches/series" || return 1
 

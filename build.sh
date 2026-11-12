@@ -263,7 +263,12 @@ build_one() {
     mv "$extracted" "$stage/celluloid-$ver_try"
 
     step "building in $image"
-    if build_in_container "$engine" "$image" "$stage" "$outdir" "$log" "$deps_present"; then
+    local backport_dir=""
+    if [[ "${BACKPORTS_AVAILABLE:-0}" == "1" ]]; then
+      backport_dir="$SCRIPT_DIR/dist/backports"
+    fi
+    if build_in_container "$engine" "$image" "$stage" "$outdir" "$log" \
+         "$deps_present" "$backport_dir"; then
       ok "[$suite] built $(debian_version "$ver_try" "$suite")"
       fix_ownership "$workroot"
       (( KEEP_WORK )) || rm -rf "$stage" "$workroot/unpack"
