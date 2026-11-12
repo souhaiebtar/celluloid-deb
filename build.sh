@@ -330,6 +330,9 @@ backports_available() {
 # True only when the suite declares backport_* library versions, i.e. when its
 # own libraries are too old for the version being built. This keeps sid building
 # against its own (newer) GTK rather than trixie's private one.
+#
+# Returns an exit status, not a string: callers use it directly in `if`, and
+# printing here would leak into the build's stdout.
 suite_needs_backports() {
   local suite=$1
   python3 - "$SUITES_FILE" "$suite" <<'PY'
@@ -339,9 +342,7 @@ path, suite = sys.argv[1], sys.argv[2]
 with open(path, "rb") as fh:
     data = tomllib.load(fh)
 s = data.get(suite, {})
-# Declared backport versions are what make this suite's resolution possible;
-# without them the suite has nothing to gain from them.
-print("yes" if s.get("backport_gtk4") or s.get("backport_libadwaita") else "no")
+sys.exit(0 if (s.get("backport_gtk4") or s.get("backport_libadwaita")) else 1)
 PY
 }
 

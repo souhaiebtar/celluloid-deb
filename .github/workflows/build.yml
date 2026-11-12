@@ -246,19 +246,24 @@ jobs:
       # from an older upstream version would otherwise linger as stale files
       # next to the current ones.
       #
-      # `gh release delete` exits 1 with "release not found" on the first run,
-      # which is not an error here, so the failure is tolerated explicitly.
+      # Deletion is best-effort and retried: if it silently no-ops (as it did
+      # once, leaving an old 0.29 asset next to the new 0.30 one), the publish
+      # step below still replaces assets by name, so only assets that no longer
+      # exist in this run are stale.
       - name: Remove previous nightly release
         if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release delete nightly --yes --cleanup-tag
-            echo "removed previous nightly release"
-          else
-            echo "no previous nightly release; nothing to remove"
-          fi
+          for attempt in 1 2 3; do
+            if gh release delete nightly --yes --cleanup-tag 2>/dev/null; then
+              echo "removed previous nightly release"
+              exit 0
+            fi
+            echo "attempt $attempt: nightly release not removed yet"
+            sleep 2
+          done
+          echo "no previous nightly release, or it could not be removed; continuing"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
