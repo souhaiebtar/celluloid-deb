@@ -34,7 +34,38 @@ permissions:
   contents: write
 
 jobs:
+  # Builds the private-prefix GTK 4.20 + libadwaita 1.8 packages that Debian 13
+  # needs for Celluloid 0.30. Runs once and is shared by the trixie build, since
+  # it takes ~10 minutes and does not depend on the Celluloid version.
+  backports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl gnupg2 tar python3
+
+      - name: Cache backport sources
+        uses: actions/cache@v4
+        with:
+          path: build/backports/src
+          key: backport-src-${{ hashFiles('backports.toml') }}
+
+      - name: Build GTK + libadwaita backports
+        env:
+          CONTAINER_ENGINE: docker
+        run: ./build-backports.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: celluloid-backports
+          path: dist/backports/*.deb
+          if-no-files-found: error
+
   build:
+    needs: backports
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,6 +79,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends curl gnupg2 tar python3
+
+      # The trixie build needs the backports to reach Celluloid 0.30; other
+      # suites ignore them. Downloading them here is cheaper than rebuilding.
+      - name: Fetch backports
+        uses: actions/download-artifact@v4
+        with:
+          name: celluloid-backports
+          path: dist/backports
 
       # The build dependencies image is the expensive part of a run (~2.5 min of
       # apt per suite). Cache it between runs, keyed on the recipe that
@@ -144,7 +183,6 @@ jobs:
           path: artifacts
 
       - name: Collect packages and build release notes
-
         run: |
           mkdir -p packages
           find artifacts -name '*.deb' -exec cp {} packages/ \;
@@ -160,6 +198,22 @@ jobs:
             file=$(basename "$(ls packages/*_"$suite"_*.deb | head -1)")
             printf '| %s | %s | `%s` |\n' "$suite" "$version" "$file" >> release-notes.md
           done
+
+          # Note the backports explicitly: on trixie, Celluloid 0.30 needs them
+          # and will refuse to install without them.
+          if compgen -G "packages/*-backport_*.deb" >/dev/null; then
+            cat >> release-notes.md <<'EOF'
+
+          **Debian 13 users: install the backports too.** Celluloid 0.30 needs
+          GTK >= 4.19.4 and libadwaita 1.8, which trixie does not ship. The
+          `-backport` packages below provide them under `/opt/gtk420` without
+          replacing the system GTK:
+
+          ```sh
+          sudo apt install ./*-backport_*.deb ./celluloid_*trixie*.deb
+          ```
+          EOF
+          fi
 
           cat >> release-notes.md <<'EOF'
 
