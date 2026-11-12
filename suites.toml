@@ -1,0 +1,41 @@
+# Debian target suites and the dependency ceiling each one provides.
+#
+# Celluloid tracks GTK4/libadwaita closely, so the newest upstream release is
+# not always buildable on every Debian release. Instead of hardcoding a version
+# per suite, the builder walks Celluloid releases newest-first and picks the
+# first one whose meson requirements are satisfied by the suite's libraries.
+#
+# "ceiling" values are the library versions shipped by that suite. They are a
+# fast-path cache for resolution; the real authority is meson configure inside
+# the container, which is why a failed configure downgrades automatically.
+
+[bookworm]
+release     = "12"
+image       = "docker.io/library/debian:12"
+distribution = "bookworm"
+# from Debian 12 (bookworm)
+gtk4        = "4.8.3"
+libadwaita  = "1.2.2"
+libmpv      = "0.32.0"
+# keep the runner quiet about end-of-life mirrors
+archive     = "deb http://deb.debian.org/debian bookworm main"
+
+[trixie]
+release     = "13"
+image       = "docker.io/library/debian:13"
+distribution = "trixie"
+# from Debian 13 (trixie)
+gtk4        = "4.18.6"
+libadwaita  = "1.7.6"
+libmpv      = "0.40.0"
+archive     = "deb http://deb.debian.org/debian trixie main"
+
+[sid]
+release     = "sid"
+image       = "docker.io/library/debian:sid"
+distribution = "sid"
+# from Debian unstable
+gtk4        = "4.24.1"
+libadwaita  = "1.10.0"
+libmpv      = "0.42.0"
+archive     = "deb http://deb.debian.org/debian sid main"

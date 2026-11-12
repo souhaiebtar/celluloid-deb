@@ -1,0 +1,3 @@
+# Empty patch series: packaging is generated from the pristine upstream
+# tarball. Present so the quilt format has something to read, and so patches can
+# be added later without changing the source format.

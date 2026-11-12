@@ -1,0 +1,6 @@
+# uscan/watch for upstream Celluloid releases.
+# The GitHub tag page is the authoritative source for tagged releases.
+version=5
+opts="mode=git,pgpmode=none" \
+https://github.com/celluloid-player/celluloid.git \
+refs/tags/v?.*

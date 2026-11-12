@@ -1,0 +1,37 @@
+Source: celluloid
+Section: video
+Priority: optional
+Maintainer: @MAINTAINER@
+Build-Depends: appstream,
+               debhelper-compat (= 13),
+               desktop-file-utils,
+               gettext,
+               libadwaita-1-dev,
+               libepoxy-dev,
+               libglib2.0-dev,
+               libgtk-4-dev,
+               libmpv-dev (>= 0.32),
+               meson,
+               ninja-build,
+               pkgconf,
+Standards-Version: 4.7.2
+Homepage: https://github.com/celluloid-player/celluloid
+Rules-Requires-Root: no
+Vcs-Git: https://github.com/celluloid-player/celluloid.git
+Vcs-Browser: https://github.com/celluloid-player/celluloid
+
+Package: celluloid
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+Recommends: yt-dlp,
+Suggests: gnome-mpv,
+Replaces: gnome-mpv (<< 0.17-1~),
+Breaks: gnome-mpv (<< 0.17-1~),
+Description: simple GTK+ frontend for mpv
+ Celluloid (formerly GNOME MPV) is a simple GTK+ frontend for mpv. It
+ interacts with mpv via the client API exported by libmpv, giving access to
+ mpv's powerful playback capabilities.
+ .
+ This package is a local rebuild of upstream Celluloid @UPSTREAM_VERSION@
+ for the @SUITE@ library set. It is not an official Debian package.

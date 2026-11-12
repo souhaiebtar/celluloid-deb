@@ -1,0 +1,6 @@
+celluloid (@DEBIAN_VERSION@) @DISTRIBUTION@; urgency=medium
+
+  * Local rebuild of upstream Celluloid @UPSTREAM_VERSION@ for @SUITE@.
+  * Built from the official upstream release tarball, signature verified.
+
+ -- @MAINTAINER@  @DATE@

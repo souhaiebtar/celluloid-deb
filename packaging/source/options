@@ -1,0 +1,5 @@
+# dpkg-source options for the generated packaging tree.
+#
+# Ignore build byproducts that a resumed build may leave behind, so a rebuild
+# in the same tree produces an identical source representation.
+extend-diff-ignore = "(^|/)(config\.(log|status)|meson-logs?|_build)/"

@@ -1,0 +1,8 @@
+# Build output. Safe to delete; produced by build.sh.
+dist/
+build/
+
+# Editor and OS cruft.
+*.swp
+*~
+.DS_Store
