@@ -1,0 +1,105 @@
+name: build packages
+
+# Builds .deb packages for every supported suite on a schedule and on demand.
+# Tag pushes attach the resulting packages to a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    # weekly: picks up new upstream Celluloid releases without a commit
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Space-separated suites (default: all)"
+        required: false
+        default: ""
+      version:
+        description: "Pin an upstream version, e.g. 0.30 (default: resolve)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [bookworm, trixie, sid]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl gnupg2 tar python3
+
+      - name: Show the resolved plan
+        run: ./build.sh --list "${{ matrix.suite }}"
+
+      - name: Build ${{ matrix.suite }}
+        run: |
+          args=("${{ matrix.suite }}")
+          if [ -n "${{ inputs.version }}" ]; then
+            args+=(--version "${{ inputs.version }}")
+          fi
+          ./build.sh "${args[@]}"
+
+      - name: Rename artifacts for clarity
+        run: |
+          mkdir -p out
+          for f in dist/${{ matrix.suite }}/*.deb; do
+            [ -e "$f" ] || continue
+            base=$(basename "$f")
+            # insert the suite name before the version, so the matrix jobs
+            # never collide when several artifacts are downloaded together
+            cp "$f" "out/${base%%_*}_${{ matrix.suite }}_${base#*_}"
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: celluloid-${{ matrix.suite }}
+          path: out/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p packages
+          find artifacts -name '*.deb' -exec cp {} packages/ \;
+          ls -l packages
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/*.deb
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'nightly build' }}
+          body: |
+            Celluloid packages built from official upstream release tarballs.
+
+            | Suite | Version |
+            |---|---|
+            | bookworm (12) | newest release buildable with GTK 4.8 / libadwaita 1.2 |
+            | trixie (13) | newest release buildable with GTK 4.18 / libadwaita 1.7 |
+            | sid | newest upstream release |
+
+            Install with `sudo apt install ./<file>.deb`.
+          draft: false
+          prerelease: ${{ github.ref_type != 'tag' }}
