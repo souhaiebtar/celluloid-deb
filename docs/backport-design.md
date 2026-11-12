@@ -131,6 +131,27 @@ The two backports are private-prefix and therefore do not conflict with the
 system packages. Celluloid 0.30 for trixie then depends on them rather than on
 the system GTK.
 
+## How to build it
+
+```bash
+./build-backports.sh     # GTK 4.20 + libadwaita 1.8  (~10 min the first time)
+./build.sh trixie        # Celluloid 0.30 against them
+```
+
+`build.sh` detects `dist/backports/` and, when present, resolves trixie to
+`gtk4 4.20.4 / adw 1.8.8`, which makes 0.30 resolvable. Without them the same
+command resolves 0.29 and builds that instead. `--no-backports` forces the old
+behaviour.
+
+Install order matters for the packages, not for apt:
+
+```bash
+sudo apt install ./dist/backports/*.deb ./dist/trixie/celluloid_0.30-1~trixie_amd64.deb
+```
+
+apt resolves the order itself, because celluloid's `Depends` names
+`libgtk-4-1-backport (>= 4.20)` and `libadwaita-1-0-backport (>= 1.8)`.
+
 ## What this does NOT do
 
 - It does not upgrade the system GTK. Other applications keep 4.18.

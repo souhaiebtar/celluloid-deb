@@ -17,12 +17,25 @@ resolves this rather than hardcoding it:
 | Suite | GTK4 | libadwaita | libmpv | Newest Celluloid that builds |
 |---|---|---|---|---|
 | bookworm (12) | 4.8.3 | 1.2.2 | 0.32 | **0.27** |
-| trixie (13) | 4.18.6 | 1.7.6 | 0.40 | **0.29** |
+| trixie (13) | 4.18.6 | 1.7.6 | 0.40 | **0.29** (or **0.30** with backports) |
 | sid | 4.24 | 1.10.0 | 0.42 | **0.30** |
 
 Celluloid 0.30 requires `libadwaita >= 1.8.0`, which Debian 13 does not have.
-That is not a packaging choice — it is a hard dependency. Debian 13 therefore
-gets 0.29, which is also what Debian's own archive ships there.
+That is not a packaging choice — it is a hard dependency, and libadwaita 1.8
+itself needs GTK >= 4.19.4. Debian 13 therefore gets 0.29 by default, which is
+also what Debian's own archive ships there.
+
+**To get genuine 0.30 on Debian 13**, build the private-prefix GTK 4.20 and
+libadwaita 1.8 backports first:
+
+```bash
+./build-backports.sh     # ~10 min the first time
+./build.sh trixie        # now resolves to 0.30
+```
+
+They install under `/opt/gtk420`, so the system GTK is untouched and other
+applications keep using 4.18. See [docs/backport-design.md](docs/backport-design.md)
+for the measurements, the design, and the caveats.
 
 The resolution is automatic: `build.sh` reads each upstream release's declared
 dependency floors from its `meson.build`, compares them against the target
@@ -117,7 +130,9 @@ version always takes precedence over a locally built package.
 
 ```
 build.sh              entrypoint
+build-backports.sh    builds GTK 4.20 + libadwaita 1.8 for Debian 13
 suites.toml           target suites and their library versions
+backports.toml        backport sources, versions and prefixes
 lib/common.sh         logging and small helpers
 lib/resolve.sh        picks the version per suite
 lib/source.sh         download + GPG verification
@@ -125,9 +140,12 @@ lib/packaging.sh      generates the debian/ tree
 lib/container.sh      runs dpkg-buildpackage in a container
 lib/parse-meson.py    extracts dependency floors from meson.build
 packaging/            templates for debian/control, rules, changelog, ...
+packaging/backport/   templates for the private-prefix library packages
+docs/                 why versions differ, and the backport design
 tests/run.sh          fast checks (no container needed)
 tests/verify-package.sh  validates a built .deb
 dist/<suite>/         built packages
+dist/backports/       built GTK/libadwaita backports
 build/                scratch space (safe to delete)
 ```
 
