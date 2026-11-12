@@ -1,0 +1,31 @@
+# Build image for Celluloid packaging.
+#
+# This exists purely to cache the apt layer. Installing the build dependencies
+# takes ~2.5 minutes per suite on a cold container; baking them into an image
+# makes every subsequent build start with them already present.
+#
+# The file is a template: build.sh substitutes the base image and dependency
+# list, so a change to either invalidates the cached image via its tag (see
+# build_image_ref in lib/container.sh).
+FROM @BASE_IMAGE@
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8
+
+# One layer, so the apt lists and the downloaded .debs are discarded together
+# and do not bloat the image.
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends \
+      @BUILD_DEPS@ \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# Sanity check: fail the image build here rather than halfway through a package
+# build, where the cause would be much less obvious.
+RUN command -v dpkg-buildpackage >/dev/null \
+ && command -v meson >/dev/null \
+ && command -v ninja >/dev/null \
+ && command -v pkg-config >/dev/null \
+ && echo "build image ready"
+
+WORKDIR /workbuild

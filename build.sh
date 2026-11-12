@@ -41,6 +41,8 @@ WORK_DIR="$SCRIPT_DIR/build"
 MAINTAINER="${DEBFULLNAME:-Celluloid Local Build}"
 MAINTAINER_EMAIL="${DEBEMAIL:-celluloid@localhost.localdomain}"
 UPSTREAM_FINGERPRINT="${UPSTREAM_FINGERPRINT:-4BA23A4D2F798D926C7A0E0D0F9039A19BE2326C}"
+NO_CACHE=0
+REBUILD_IMAGE=0
 declare -a REQUESTED_SUITES=()
 
 usage() {
@@ -69,6 +71,9 @@ OPTIONS
                           Maintainer recorded in the generated changelog.
       --engine NAME       Force a container engine (podman or docker).
       --verbose           Stream the full container build log.
+      --no-cache          Do not use the cached dependency image; install
+                          build dependencies inside a plain container instead.
+      --rebuild-image     Discard and rebuild the cached dependency image.
   -h, --help              Show this help.
 
 ENVIRONMENT
@@ -81,6 +86,7 @@ EXAMPLES
   ./build.sh --list                Show the resolved plan.
   ./build.sh --latest sid          Force the newest release on sid.
   ./build.sh --version 0.29 trixie Build one exact version.
+  ./build.sh --rebuild-image       Refresh the cached dependency images.
 EOF
 }
 
@@ -98,6 +104,8 @@ parse_args() {
          --maintainer)  MAINTAINER="${2:?--maintainer needs a value}"; shift 2 ;;
          --engine)      CONTAINER_ENGINE="${2:?--engine needs a value}"; export CONTAINER_ENGINE; shift 2 ;;
          --verbose)     VERBOSE=1; shift ;;
+         --no-cache)    NO_CACHE=1; shift ;;
+         --rebuild-image) REBUILD_IMAGE=1; shift ;;
       -h|--help)        usage; exit 0 ;;
       --)               shift; while (( $# )); do REQUESTED_SUITES+=("$1"); shift; done ;;
       -*)               die "unknown option: $1 (try --help)" ;;
@@ -186,6 +194,7 @@ build_one() {
   local suite=$1 ver=$2 tag=$3 tar_url=$4 sig_url=$5
   local engine image workroot srcdir outdir log
   local attempt tag_try tar_try sig_try ver_try
+  local build_image="" deps_present=0
 
   engine=$(detect_engine) || die "no usable container engine (install podman or docker)"
   image=$(suite_setting "$suite" image)
@@ -200,6 +209,20 @@ build_one() {
 
   info "[$suite] Celluloid $ver  ($(debian_version "$ver" "$suite"))"
   ensure_image "$engine" "$image" || die "could not obtain image $image"
+
+  # Use (or build once) an image with the build dependencies already installed.
+  # That turns a ~2.5 minute apt step into a no-op. If the image cannot be
+  # built, fall back to the plain base image and install at build time: a slow
+  # build is better than no build.
+  if (( NO_CACHE )); then
+    step "cache disabled; installing dependencies in the container"
+  elif build_image=$(ensure_build_image "$engine" "$suite" "$image"); then
+    deps_present=1
+    image=$build_image
+  else
+    warn "[$suite] falling back to installing dependencies at build time"
+    build_image=""
+  fi
 
   attempt=0
   tag_try=$tag; tar_try=$tar_url; sig_try=$sig_url; ver_try=$ver
@@ -236,7 +259,7 @@ build_one() {
     mv "$extracted" "$stage/celluloid-$ver_try"
 
     step "building in $image"
-    if build_in_container "$engine" "$image" "$stage" "$outdir" "$log"; then
+    if build_in_container "$engine" "$image" "$stage" "$outdir" "$log" "$deps_present"; then
       ok "[$suite] built $(debian_version "$ver_try" "$suite")"
       fix_ownership "$workroot"
       (( KEEP_WORK )) || rm -rf "$stage" "$workroot/unpack"

@@ -45,9 +45,35 @@ No root is needed on the host: all building happens inside containers.
 ./build.sh --latest sid         # force the newest release on sid
 ./build.sh --version 0.30 sid   # build one exact version
 ./build.sh --verbose trixie     # stream the container build log
+./build.sh --rebuild-image      # refresh the cached dependency images
+./build.sh --no-cache trixie    # bypass the image cache entirely
 ```
 
 Packages land in `dist/<suite>/`.
+
+## Build caching
+
+Installing the build dependencies costs about **2.5 minutes per suite**, which
+dominated every build. The first run now bakes them into an image, and later
+runs reuse it:
+
+| Run | Time (trixie) |
+|---|---|
+| First run (builds the image) | ~263s |
+| Subsequent runs (cached) | **~26s** |
+| `--no-cache` | ~164s |
+
+The cached image is tagged with a hash of its recipe — base image, dependency
+list and Dockerfile template — so changing any of them produces a new tag and
+the stale image is ignored. Nothing needs clearing by hand.
+
+```bash
+podman images | grep celluloid-build      # the cached images
+./build.sh --rebuild-image                # force a refresh
+```
+
+If the image cannot be built, the build falls back to installing dependencies
+inside a plain container: slower, but it still works.
 
 ## Installing the result
 
@@ -66,9 +92,9 @@ package declares. The `-dbgsym` package is not built by default; set
 3. **Verify** — check the signature against the upstream signing key. A bad or
    missing signature aborts the build unless `--no-verify` is passed.
 4. **Package** — generate a `debian/` tree matching that version and suite.
-5. **Build** — run `dpkg-buildpackage` inside a pristine container image for the
-   target suite, so the binaries link against exactly the libraries that release
-   ships.
+5. **Build** — run `dpkg-buildpackage` inside a container image for the target
+   suite, so the binaries link against exactly the libraries that release
+   ships. The image already contains the build dependencies (see above).
 6. **Collect** — copy the resulting `.deb` into `dist/<suite>/`.
 
 Generated version strings use the form `0.30-1~sid`. The `~suite` suffix sorts

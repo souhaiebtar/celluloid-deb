@@ -37,6 +37,7 @@ source "$ROOT/lib/common.sh"
 source "$ROOT/lib/resolve.sh"
 source "$ROOT/lib/packaging.sh"
 source "$ROOT/lib/source.sh"
+source "$ROOT/lib/container.sh"
 
 echo "version helpers"
 eq "normalize strips v"          "0.30"   "$(normalize_version v0.30)"
@@ -75,6 +76,38 @@ eq "spacing variants" "4.6.1	1.2.0	0" \
   "$(printf "%s\n" "dependency('gtk4', version: '>= 4.6.1')" \
       "dependency('libadwaita-1', version:'>=1.2.0')" | python3 "$parser")"
 t "empty input is an error" bash -c "printf '' | python3 '$parser' >/dev/null 2>&1 && exit 1 || exit 0"
+
+echo "build image cache"
+# The tag must be a pure function of the recipe, so unrelated runs reuse it...
+a=$(build_image_ref trixie docker.io/library/debian:13 2>/dev/null)
+b=$(build_image_ref trixie docker.io/library/debian:13 2>/dev/null)
+eq "tag is stable for the same recipe" "$a" "$b"
+t  "tag is non-empty" test -n "$a"
+# ...and a different base image must produce a different tag, or a stale image
+# would be silently reused across suites.
+c=$(build_image_ref trixie docker.io/library/debian:12 2>/dev/null)
+t  "different base image changes the tag" bash -c "[ '$a' != '$c' ]"
+# Suites are separate images even with the same base.
+d=$(build_image_ref bookworm docker.io/library/debian:13 2>/dev/null)
+t  "different suite changes the tag" bash -c "[ '$a' != '$d' ]"
+# A dependency change must invalidate the cache.
+before=$(build_image_ref trixie docker.io/library/debian:13 2>/dev/null)
+BUILD_DEPS+=("zzz-nonexistent-package")
+after=$(build_image_ref trixie docker.io/library/debian:13 2>/dev/null)
+t  "changing the dependency list changes the tag" bash -c "[ '$before' != '$after' ]"
+unset 'BUILD_DEPS[-1]'
+
+# The rendered recipe must be a valid Dockerfile with no unsubstituted tokens.
+rendered=$(mktemp)
+if render_dockerfile docker.io/library/debian:13 "$rendered" 2>/dev/null; then
+  t "rendered recipe starts with FROM" bash -c "head -20 '$rendered' | grep -q '^FROM docker.io/library/debian:13'"
+  t "no unsubstituted tokens in recipe" bash -c "! grep -q '@[A-Z_]*@' '$rendered'"
+  t "recipe installs the dependencies" bash -c "grep -q 'libadwaita-1-dev' '$rendered'"
+  t "recipe cleans the apt cache" bash -c "grep -q 'rm -rf /var/lib/apt/lists' '$rendered'"
+else
+  printf '  FAIL could not render recipe\n'; fail=$((fail+1))
+fi
+rm -f "$rendered"
 
 echo "packaging generation"
 tmp=$(mktemp -d)

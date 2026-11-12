@@ -41,16 +41,54 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends curl gnupg2 tar python3
 
+      # The build dependencies image is the expensive part of a run (~2.5 min of
+      # apt per suite). Cache it between runs, keyed on the recipe that
+      # produces it: the Dockerfile template, the dependency list and the
+      # suite table. A change to any of those correctly misses the cache.
+      - name: Compute dependency-image cache key
+        id: image-key
+        run: |
+          key=$(cat packaging/Dockerfile.build.in suites.toml \
+                  lib/container.sh | sha256sum | cut -c1-16)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached dependency image
+        id: image-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/celluloid-image-cache
+          key: celluloid-image-${{ matrix.suite }}-${{ steps.image-key.outputs.key }}
+
+      - name: Load cached dependency image
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: |
+          if [ -f /tmp/celluloid-image-cache/image.tar ]; then
+            docker load -i /tmp/celluloid-image-cache/image.tar
+          fi
+
       - name: Show the resolved plan
         run: ./build.sh --list "${{ matrix.suite }}"
 
       - name: Build ${{ matrix.suite }}
+        env:
+          CONTAINER_ENGINE: docker
         run: |
           args=("${{ matrix.suite }}")
           if [ -n "${{ inputs.version }}" ]; then
             args+=(--version "${{ inputs.version }}")
           fi
           ./build.sh "${args[@]}"
+
+      # Save the image after the build so the next run skips the apt step.
+      - name: Save dependency image to cache
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          ref=$(docker images --format '{{.Repository}}:{{.Tag}}' \
+                  | grep '^localhost/celluloid-build:' | head -1)
+          if [ -n "$ref" ]; then
+            mkdir -p /tmp/celluloid-image-cache
+            docker save "$ref" -o /tmp/celluloid-image-cache/image.tar
+          fi
 
       - name: Rename artifacts for clarity
         run: |
