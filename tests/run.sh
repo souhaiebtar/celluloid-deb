@@ -57,6 +57,22 @@ t  "local build sorts below archive upload" \
 t  "local build sorts above older upstream" \
    dpkg --compare-versions "0.29-1~trixie" gt "0.28-2"
 
+echo "backport-aware resolution"
+# trixie's own GTK is too old for 0.30; with backports it becomes buildable.
+eq "trixie without backports sees GTK 4.18" "4.18.6 1.7.6 0.40.0" \
+  "$(BACKPORTS_AVAILABLE=0 suite_libs trixie)"
+eq "trixie with backports sees GTK 4.20" "4.20.4 1.8.8 0.40.0" \
+  "$(BACKPORTS_AVAILABLE=1 suite_libs trixie)"
+# Suites with no backport_* keys must be unaffected.
+eq "bookworm unaffected by backports" "4.8.3 1.2.2 0.32.0" \
+  "$(BACKPORTS_AVAILABLE=1 suite_libs bookworm)"
+eq "sid unaffected by backports" "4.24.1 1.10.0 0.42.0" \
+  "$(BACKPORTS_AVAILABLE=1 suite_libs sid)"
+# The backported floors must actually satisfy Celluloid 0.30's requirements.
+read -r bgtk badw _ < <(BACKPORTS_AVAILABLE=1 suite_libs trixie)
+t "backport GTK satisfies 0.30 (gtk>=4.16, adw>=1.8)" \
+  bash -c "dpkg --compare-versions '$bgtk' ge 4.16.0 && dpkg --compare-versions '$badw' ge 1.8.0"
+
 echo "suite metadata"
 eq "bookworm release"    "12"     "$(suite_setting bookworm release)"
 eq "trixie release"      "13"     "$(suite_setting trixie release)"

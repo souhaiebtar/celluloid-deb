@@ -95,21 +95,31 @@ meson_floors() {
 
 # ------------------------------------------------------------- resolver ---
 # Libraries shipped by a suite, as "gtk4 libadwaita libmpv".
+#
+# When suite_use_backports is set, a suite's backport_* values are used instead
+# of its system libraries, because the backport packages will be installed for
+# the build. That is what makes Celluloid 0.30 resolvable on trixie.
 suite_libs() {
   local suite=$1
-  python3 - "$SUITES_FILE" "$suite" <<'PY'
+  python3 - "$SUITES_FILE" "$suite" "${BACKPORTS_AVAILABLE:-0}" <<'PY'
 import sys
 try:
     import tomllib
 except ModuleNotFoundError:
     sys.exit("python3 >= 3.11 is required (tomllib)")
-path, suite = sys.argv[1], sys.argv[2]
+path, suite, use_backports = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 with open(path, "rb") as fh:
     data = tomllib.load(fh)
 if suite not in data:
     sys.exit("unknown suite: %s" % suite)
 s = data[suite]
-print(s.get("gtk4", "0"), s.get("libadwaita", "0"), s.get("libmpv", "0"))
+def pick(key, fallback):
+    # A backport value is only used when backports are actually available for
+    # this build; otherwise the suite's system libraries are the truth.
+    if use_backports and ("backport_" + key) in s:
+        return s["backport_" + key]
+    return s.get(key, fallback)
+print(pick("gtk4", "0"), pick("libadwaita", "0"), s.get("libmpv", "0"))
 PY
 }
 

@@ -24,11 +24,18 @@ archive     = "deb http://deb.debian.org/debian bookworm main"
 release     = "13"
 image       = "docker.io/library/debian:13"
 distribution = "trixie"
-# from Debian 13 (trixie)
+# from Debian 13 (trixie), the system library versions
 gtk4        = "4.18.6"
 libadwaita  = "1.7.6"
 libmpv      = "0.40.0"
 archive     = "deb http://deb.debian.org/debian trixie main"
+# Trixie's own GTK is too old for Celluloid 0.30, which needs libadwaita 1.8 and
+# therefore GTK >= 4.19.4. When the backport packages (see build-backports.sh)
+# are available, resolution uses these versions instead and 0.30 becomes
+# buildable. Without them the suite falls back to 0.29, which needs nothing
+# extra.
+backport_gtk4       = "4.20.4"
+backport_libadwaita = "1.8.8"
 
 [sid]
 release     = "sid"

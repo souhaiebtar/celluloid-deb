@@ -43,6 +43,7 @@ MAINTAINER_EMAIL="${DEBEMAIL:-celluloid@localhost.localdomain}"
 UPSTREAM_FINGERPRINT="${UPSTREAM_FINGERPRINT:-4BA23A4D2F798D926C7A0E0D0F9039A19BE2326C}"
 NO_CACHE=0
 REBUILD_IMAGE=0
+NO_BACKPORTS=0
 declare -a REQUESTED_SUITES=()
 
 usage() {
@@ -74,6 +75,8 @@ OPTIONS
       --no-cache          Do not use the cached dependency image; install
                           build dependencies inside a plain container instead.
       --rebuild-image     Discard and rebuild the cached dependency image.
+      --no-backports      Ignore the GTK/libadwaita backports, so each suite is
+                          limited to what Debian itself ships.
   -h, --help              Show this help.
 
 ENVIRONMENT
@@ -106,6 +109,7 @@ parse_args() {
          --verbose)     VERBOSE=1; shift ;;
          --no-cache)    NO_CACHE=1; shift ;;
          --rebuild-image) REBUILD_IMAGE=1; shift ;;
+         --no-backports)  NO_BACKPORTS=1; shift ;;
       -h|--help)        usage; exit 0 ;;
       --)               shift; while (( $# )); do REQUESTED_SUITES+=("$1"); shift; done ;;
       -*)               die "unknown option: $1 (try --help)" ;;
@@ -291,9 +295,36 @@ build_one() {
 }
 
 # ------------------------------------------------------------------- main ---
+# backports_available — are the private-prefix GTK/libadwaita backports built?
+#
+# Their presence is what lets trixie resolve Celluloid 0.30. Checking the output
+# directory rather than the installed packages keeps this a pure build-time
+# decision: nothing has to be installed on the host.
+backports_available() {
+  local dir="$SCRIPT_DIR/dist/backports"
+  local gtk adw
+  shopt -s nullglob
+  gtk=("$dir"/libgtk-4-1-backport_*.deb)
+  adw=("$dir"/libadwaita-1-0-backport_*.deb)
+  shopt -u nullglob
+  (( ${#gtk[@]} > 0 && ${#adw[@]} > 0 ))
+}
+
 main() {
   parse_args "$@"
   check_prerequisites
+
+  # Detect the backports once, before resolution: suite_libs consults this to
+  # decide whether trixie should be treated as GTK 4.18 or the backported 4.20.
+  if (( NO_BACKPORTS )); then
+    BACKPORTS_AVAILABLE=0
+  elif backports_available; then
+    BACKPORTS_AVAILABLE=1
+    info "using GTK/libadwaita backports from dist/backports"
+  else
+    BACKPORTS_AVAILABLE=0
+  fi
+  export BACKPORTS_AVAILABLE
 
   if (( LIST_ONLY )); then
     print_plan
