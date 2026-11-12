@@ -147,3 +147,61 @@ the system GTK.
 - `ldd` shows no missing libraries.
 - The binary runs on a system where the private prefix is present.
 - No file ownership conflict with system packages (`dpkg -S` checks).
+
+## Verification results
+
+All of the above were checked inside a clean `debian:13` container.
+
+Installing the two packages:
+
+```
+Setting up libgtk-4-1-backport (4.20.4-1~trixie) ...
+Setting up libadwaita-1-0-backport (1.8.8-1~trixie) ...
+installed ok
+```
+
+Nothing outside the private prefix:
+
+```
+$ dpkg -L libgtk-4-1-backport | grep -v '^/opt' | grep -v '^/usr/share/doc'
+/.
+/usr
+/usr/share
+```
+
+Celluloid 0.30 built against them:
+
+```
+gtk4:       4.20.4
+libadwaita: 1.8.8
+CELLULOID_030_BUILD_OK
+RUNPATH:    /opt/gtk420/lib/x86_64-linux-gnu
+private libs: 2
+missing:      0
+$ celluloid --version
+Celluloid 0.30
+```
+
+### Building against the backports needs trixie's own dev packages
+
+GTK's `gtk4.pc` legitimately declares an external `Requires` chain, so a
+dependent build needs the corresponding trixie `-dev` packages present:
+
+```
+pango, pangocairo, gdk-pixbuf-2.0, cairo, cairo-gobject,
+graphene-gobject-1.0, gio-2.0
+```
+
+plus `libappstream-dev` for libadwaita and `libepoxy-dev` for Celluloid itself.
+These are build-time only; the runtime dependencies are the normal trixie
+libraries, which is why the built binary resolves cleanly against the system.
+
+### Package contents
+
+| Package | Size | Notes |
+|---|---|---|
+| libgtk-4-1-backport | 8.5 MB | headers and `.pc` included, so it is self-sufficient as a dev dependency |
+| libadwaita-1-0-backport | 0.8 MB | depends on `libgtk-4-1-backport (>= 4.20)` |
+
+Wayland libraries are not bundled: the built `libgtk-4.so.1` resolves
+`libwayland-client.so.0` from the system, as measured earlier.
