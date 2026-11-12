@@ -27,6 +27,7 @@ _CELLULOID_CONTAINER_SH=1
 # runtime dependencies are derived automatically by ${shlibs:Depends}.
 BUILD_DEPS=(
   appstream
+  libappstream-dev
   build-essential
   debhelper
   desktop-file-utils iso-codes

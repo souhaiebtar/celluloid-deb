@@ -208,6 +208,9 @@ build_one() {
   outdir="$OUTPUT_DIR/$suite"
   log="$WORK_DIR/$suite.log"
 
+  # A previous run's container may have left root-owned files; take them back
+  # before deleting or the rm silently fails and stale state is reused.
+  fix_ownership "$workroot"
   rm -rf "$workroot"
   mkdir -p "$srcdir" "$outdir" "$WORK_DIR"
 
@@ -263,8 +266,11 @@ build_one() {
     mv "$extracted" "$stage/celluloid-$ver_try"
 
     step "building in $image"
+    # The backports are only for suites that actually need them: a suite whose
+    # own libraries already satisfy the requested version must build against
+    # what Debian ships, not against trixie's private GTK.
     local backport_dir=""
-    if [[ "${BACKPORTS_AVAILABLE:-0}" == "1" ]]; then
+    if [[ "${BACKPORTS_AVAILABLE:-0}" == "1" ]] && suite_needs_backports "$suite"; then
       backport_dir="$SCRIPT_DIR/dist/backports"
     fi
     if build_in_container "$engine" "$image" "$stage" "$outdir" "$log" \
@@ -295,6 +301,10 @@ build_one() {
     ver_try=$(normalize_version "$prev")
     tag_try=$prev
     IFS=$'\t' read -r tar_try sig_try < <(release_urls "$prev")
+    # The failed attempt ran in a container, which may have left root-owned
+    # files behind. Take ownership back before deleting, or rm fails and the
+    # retry never happens.
+    fix_ownership "$workroot"
     rm -rf "$workroot/unpack" "$workroot/stage" "$outdir"/*
   done
 }
@@ -313,6 +323,26 @@ backports_available() {
   adw=("$dir"/libadwaita-1-0-backport_*.deb)
   shopt -u nullglob
   (( ${#gtk[@]} > 0 && ${#adw[@]} > 0 ))
+}
+
+# suite_needs_backports <suite> — does this suite rely on the backports?
+#
+# True only when the suite declares backport_* library versions, i.e. when its
+# own libraries are too old for the version being built. This keeps sid building
+# against its own (newer) GTK rather than trixie's private one.
+suite_needs_backports() {
+  local suite=$1
+  python3 - "$SUITES_FILE" "$suite" <<'PY'
+import sys
+import tomllib
+path, suite = sys.argv[1], sys.argv[2]
+with open(path, "rb") as fh:
+    data = tomllib.load(fh)
+s = data.get(suite, {})
+# Declared backport versions are what make this suite's resolution possible;
+# without them the suite has nothing to gain from them.
+print("yes" if s.get("backport_gtk4") or s.get("backport_libadwaita") else "no")
+PY
 }
 
 main() {
