@@ -52,4 +52,6 @@ meson_args = [
   "-Dintrospection=disabled",
   "-Dvapi=false",
   "-Dtests=false",
+  "-Dexamples=false",
+  "-Dgtk_doc=false",
 ]

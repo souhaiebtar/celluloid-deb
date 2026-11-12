@@ -29,7 +29,7 @@ BUILD_DEPS=(
   appstream
   build-essential
   debhelper
-  desktop-file-utils
+  desktop-file-utils iso-codes
   dpkg-dev
   fakeroot
   gettext
@@ -307,4 +307,201 @@ fix_ownership() {
     fi
     warn "some files in $dir are not owned by you; you may need sudo to remove them"
   fi
+}
+
+# ===========================================================================
+# Backport builds
+#
+# These need a chain: wayland 1.24 -> GTK 4.20 -> libadwaita 1.8. Each stage
+# requires the previous one to be installed into a prefix, so the build runs as
+# one container per package with the prefix carried in a volume.
+# ===========================================================================
+
+# Build dependencies for wayland 1.24.
+WAYLAND_BUILD_DEPS=(build-essential meson ninja-build pkgconf debhelper dpkg-dev libffi-dev libexpat1-dev libxml2-dev)
+
+# Build dependencies for GTK 4.20. wayland-protocols comes from trixie (1.44 is
+# new enough); wayland itself is built first.
+GTK_BUILD_DEPS=(
+  build-essential meson ninja-build pkgconf gettext debhelper dpkg-dev fakeroot
+  libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
+  libgraphene-1.0-dev libepoxy-dev libxkbcommon-dev libdrm-dev
+  libffi-dev libexpat1-dev libxml2-dev
+  libx11-dev libxi-dev libxext-dev libxrandr-dev libxcursor-dev
+  libxdamage-dev libxfixes-dev libxinerama-dev
+  libfribidi-dev libpng-dev libtiff-dev libjpeg-dev libharfbuzz-dev
+  librsvg2-dev libfontconfig-dev libcolord-dev libcups2-dev
+  libsysprof-capture-4-dev wayland-protocols python3-jinja2 iso-codes \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev
+)
+
+# Build dependencies for libadwaita 1.8. It needs a GTK dev environment, which
+# the private prefix provides once GTK is installed there.
+ADW_BUILD_DEPS=(
+  build-essential meson ninja-build pkgconf gettext debhelper dpkg-dev fakeroot
+  libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
+  libgraphene-1.0-dev libepoxy-dev libxkbcommon-dev libdrm-dev
+  libffi-dev libexpat1-dev libxml2-dev
+  libx11-dev libxi-dev libxext-dev libxrandr-dev libxcursor-dev
+  libxdamage-dev libxfixes-dev libxinerama-dev
+  libfribidi-dev libpng-dev libtiff-dev libjpeg-dev libharfbuzz-dev
+  librsvg2-dev libfontconfig-dev libcolord-dev libcups2-dev
+  libsysprof-capture-4-dev wayland-protocols python3-jinja2
+  libappstream-dev sassc
+)
+
+# _pkgconfig_path <prefix>... — colon-joined pkgconfig search path for prefixes.
+_pkgconfig_path() {
+  local out="" p
+  for p in "$@"; do
+    out+="${out:+:}$p/lib/x86_64-linux-gnu/pkgconfig:$p/lib/pkgconfig:$p/share/pkgconfig"
+  done
+  printf '%s' "$out"
+}
+
+# _run_engine <engine> <logfile> <script> <image> [extra args...]
+# Shared plumbing for the backport containers: fresh log, verbose handling,
+# correct exit status through tee.
+_run_engine() {
+  local engine=$1 logfile=$2 script=$3 image=$4
+  shift 4
+
+  : > "$logfile"
+  if verbose; then
+    "$engine" run --rm "$@" "$image" bash -c "$script" 2>&1 | tee -a "$logfile"
+    return "${PIPESTATUS[0]}"
+  fi
+  "$engine" run --rm "$@" "$image" bash -c "$script" >>"$logfile" 2>&1
+}
+
+# build_gtk_in_container <stage_dir> <outdir> <logfile> <wayland_tarball>
+#
+# Builds wayland 1.24 into a private prefix, then GTK 4.20 against it, then
+# packages GTK. Wayland is staged inside the image and discarded with it: GTK
+# needs it only to compile its Wayland backend.
+build_gtk_in_container() {
+  local stage=$1 outdir=$2 logfile=$3 wayland_tar=$4
+  local engine opts vol_stage vol_out vol_wl
+  local wayland_prefix="${WAYLAND_PREFIX:-/opt/wl124}"
+  local gtk_prefix="${GTK_PREFIX:-/opt/gtk420}"
+  local pkgconfig_path
+  pkgconfig_path=$(_pkgconfig_path "$wayland_prefix" "$gtk_prefix")
+
+  engine=$(detect_engine) || die "no usable container engine"
+  [[ -s "$wayland_tar" ]] || { warn "missing wayland tarball: $wayland_tar" >&2; return 1; }
+  opts=$(_volume_opts "$engine")
+  # Mount the *parent* of the staged tree, so /workbuild holds gtk-<version>/
+  # rather than being the tree itself.
+  local stage_parent
+  stage_parent=$(dirname "$stage")
+  vol_stage="$stage_parent:/workbuild$opts"
+  vol_out="$outdir:/outbuild$opts"
+  # Mount just the wayland tarball, not its directory: the cache also holds
+  # other sources and a broad glob inside the container would pick them up.
+  vol_wl="$wayland_tar:/wlsrc/$(basename "$wayland_tar"):ro$opts"
+
+  # shellcheck disable=SC2016
+  local inner='
+set -o pipefail
+export DEBIAN_FRONTEND=noninteractive
+export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:+$DEB_BUILD_OPTIONS }noautodbgsym"
+
+echo "### installing build dependencies"
+apt-get update -qq || exit 1
+apt-get install -y -qq --no-install-recommends '"${GTK_BUILD_DEPS[*]}"' || exit 1
+
+echo "### building wayland (build-time only)"
+mkdir -p /wl-build && cd /wl-build || exit 1
+# Only wayland: the mount is a single tarball at a known path.
+for a in /wlsrc/wayland-*.tar.xz; do tar -xf "$a" || exit 1; done
+cd wayland-* || exit 1
+meson setup _b --buildtype=plain --prefix='"$wayland_prefix"' \
+  -Ddocumentation=false -Dtests=false >/dev/null || exit 1
+ninja -C _b >/dev/null && ninja -C _b install >/dev/null || exit 1
+echo "wayland installed to '"$wayland_prefix"'"
+
+export PKG_CONFIG_PATH='"$pkgconfig_path"'
+
+echo "### building GTK"
+src=$(find /workbuild -mindepth 1 -maxdepth 1 -type d -name "gtk-*" | head -1)
+[ -n "$src" ] || { echo "no GTK source tree" >&2; exit 1; }
+cd "$src" || exit 1
+dpkg-buildpackage -b -uc -us --no-pre-clean -j"$(nproc)" 2>&1 || exit 1
+
+echo "### collecting"
+shopt -s nullglob
+found=0
+for f in /workbuild/*.deb; do cp -v "$f" /outbuild/ || exit 1; found=1; done
+[ "$found" -eq 1 ] || { echo "no .deb produced" >&2; exit 1; }
+echo "### done"
+'
+
+  _run_engine "$engine" "$logfile" "$inner" "docker.io/library/debian:13" \
+    -v "$vol_stage" -v "$vol_out" -v "$vol_wl"
+}
+
+# build_adw_in_container <stage_dir> <outdir> <logfile>
+#
+# Builds libadwaita against the GTK already installed in the prefix. The GTK
+# .deb is unpacked into the container first so the dev files are available
+# without needing the package installed.
+build_adw_in_container() {
+  local stage=$1 outdir=$2 logfile=$3
+  local engine opts vol_stage vol_out vol_gtk gtk_deb
+  local gtk_prefix="${GTK_PREFIX:-/opt/gtk420}"
+  local wayland_prefix="${WAYLAND_PREFIX:-/opt/wl124}"
+  local pkgconfig_path
+  # Resolved on the host: the container has no access to this script's helpers.
+  pkgconfig_path=$(_pkgconfig_path "$gtk_prefix" "$wayland_prefix")
+
+  engine=$(detect_engine) || die "no usable container engine"
+  opts=$(_volume_opts "$engine")
+  local stage_parent
+  stage_parent=$(dirname "$stage")
+  vol_stage="$stage_parent:/workbuild$opts"
+  vol_out="$outdir:/outbuild$opts"
+
+  # The GTK packages built by the previous stage.
+  shopt -s nullglob
+  local gtk_glob=("$outdir"/libgtk-4-1-backport_*.deb)
+  shopt -u nullglob
+  (( ${#gtk_glob[@]} )) || { warn "GTK .deb missing; build GTK first" >&2; return 1; }
+  gtk_deb=${gtk_glob[0]}
+
+  local gtkdir
+  gtkdir=$(dirname "$gtk_deb")
+  vol_gtk="$gtkdir:/gtkdeb:ro$opts"
+
+  # shellcheck disable=SC2016
+  local inner='
+set -o pipefail
+export DEBIAN_FRONTEND=noninteractive
+export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:+$DEB_BUILD_OPTIONS }noautodbgsym"
+
+echo "### installing build dependencies"
+apt-get update -qq || exit 1
+apt-get install -y -qq --no-install-recommends '"${ADW_BUILD_DEPS[*]}"' || exit 1
+
+# Unpack the backported GTK into the private prefix so pkg-config finds a real
+# GTK dev environment. No system file is touched.
+echo "### unpacking backported GTK into '"$gtk_prefix"'"
+for deb in /gtkdeb/*.deb; do dpkg-deb -x "$deb" / ; done
+export PKG_CONFIG_PATH='"$pkgconfig_path"'
+echo "gtk4 seen: $(pkg-config --modversion gtk4)"
+
+src=$(find /workbuild -mindepth 1 -maxdepth 1 -type d -name "libadwaita-*" | head -1)
+[ -n "$src" ] || { echo "no libadwaita source tree" >&2; exit 1; }
+cd "$src" || exit 1
+dpkg-buildpackage -b -uc -us --no-pre-clean -j"$(nproc)" 2>&1 || exit 1
+
+echo "### collecting"
+shopt -s nullglob
+found=0
+for f in /workbuild/*.deb; do cp -v "$f" /outbuild/ || exit 1; found=1; done
+[ "$found" -eq 1 ] || { echo "no .deb produced" >&2; exit 1; }
+echo "### done"
+'
+
+  _run_engine "$engine" "$logfile" "$inner" "docker.io/library/debian:13" \
+    -v "$vol_stage" -v "$vol_out" -v "$vol_gtk"
 }

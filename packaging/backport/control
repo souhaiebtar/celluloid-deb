@@ -13,6 +13,7 @@ Package: @PACKAGE@
 Architecture: any
 Depends: ${misc:Depends},
          ${shlibs:Depends},
+@EXTRA_DEPENDS@
 Description: @NAME@ @VERSION@ backport for Debian 13 (private prefix)
  Private-prefix build of @NAME@ @VERSION@, installed under @PREFIX@.
  .
