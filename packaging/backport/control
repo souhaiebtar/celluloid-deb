@@ -1,0 +1,23 @@
+Source: @NAME@-backport
+Section: libs
+Priority: optional
+Maintainer: @MAINTAINER@
+Build-Depends: debhelper-compat (= 13),
+               meson,
+               ninja-build,
+               pkgconf,
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: @PACKAGE@
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+Description: @NAME@ @VERSION@ backport for Debian 13 (private prefix)
+ Private-prefix build of @NAME@ @VERSION@, installed under @PREFIX@.
+ .
+ This exists so Celluloid 0.30 can build on Debian 13, whose own @NAME@ is
+ too old. It deliberately does not install into /usr, so no Debian-packaged
+ library is replaced and other applications keep using the system copy.
+ .
+ This is not an official Debian package.

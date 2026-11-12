@@ -1,0 +1,37 @@
+#!/usr/bin/make -f
+# Debian build rules for a private-prefix library backport.
+#
+# The whole point is that nothing lands in /usr. meson is configured with the
+# package's own prefix, and debhelper installs into a staging directory as
+# usual, so the resulting .deb contains only files under @PREFIX@.
+#
+# @SKIP_SCHEMAS@ is 1 for GTK: its GSettings schemas use the same IDs and paths
+# as the system copy, so shipping them would make glib-compile-schemas fail on
+# duplicate IDs. The system schemas resolve the same keys, so omitting them is
+# correct rather than lazy.
+
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/default.mk
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_BUILD_OPTIONS = noautodbgsym
+
+%:
+	dh $@ --buildsystem=meson
+
+override_dh_auto_configure:
+	dh_auto_configure -- --prefix=@PREFIX@ --libdir=@PREFIX@/lib/x86_64-linux-gnu
+
+# Nothing in a runtime library backport needs a linker flag or a symbol file we
+# would have to maintain; keep the package lean and predictable.
+override_dh_makeshlibs:
+	@echo "Skipping dh_makeshlibs (private prefix, no system ldconfig entry)"
+
+override_dh_shlibdeps:
+	@echo "Skipping dh_shlibdeps (private prefix)"
+
+# No ldconfig trigger: the libraries live outside the dynamic linker's default
+# search path by design.
+override_dh_installdeb:
+	dh_installdeb
+	@echo "private prefix: no ldconfig trigger registered"

@@ -1,0 +1,24 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: @NAME@
+Source: built from the upstream @NAME@ @VERSION@ release tarball
+
+Files: *
+Copyright: the @NAME@ contributors
+License: LGPL-2.1+
+ This library is free software; you can redistribute it and/or modify it
+ under the terms of the GNU Lesser General Public License as published by
+ the Free Software Foundation; either version 2.1 of the License, or (at
+ your option) any later version.
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License version 2.1 can be found in
+ /usr/share/common-licenses/LGPL-2.1.
+
+Files: debian/*
+Copyright: 2026 @MAINTAINER@
+License: LGPL-2.1+
+ Backport packaging, released under the same terms as upstream.
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License version 2.1 can be found in
+ /usr/share/common-licenses/LGPL-2.1.

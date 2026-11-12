@@ -18,9 +18,43 @@ gdk/wayland/gdkseat-wayland.c:1500:18: error:
   'WL_KEYBOARD_KEY_STATE_REPEATED' undeclared (first use in this function)
 ```
 
-So getting native Wayland means shipping Wayland 1.24 too. The alternative —
-GTK with `-Dwayland-backend=false` — compiles but loses native Wayland, leaving
-Celluloid on XWayland. That was rejected.
+trixie's protocol XML only defines `released` and `pressed`:
+
+```
+$ grep -A6 '<enum name="key_state"' /usr/share/wayland/wayland.xml
+      <entry name="released" value="0" .../>
+      <entry name="pressed"  value="1" .../>
+```
+
+So GTK 4.20 cannot compile its Wayland backend without a newer Wayland.
+
+### Wayland is a build-time dependency only
+
+This is the useful part, and it was measured rather than assumed. After building
+GTK 4.20 against wayland 1.24, every `wl_*` symbol the library imports was
+checked against trixie's own `libwayland-client.so.0` (1.23.1):
+
+```
+ALL_WAYLAND_SYMBOLS_PRESENT_IN_SYSTEM
+```
+
+and `ldd` on the final Celluloid binary resolves Wayland from the system:
+
+```
+libgtk-4.so.1          => /opt/gtk420/lib/x86_64-linux-gnu/libgtk-4.so.1
+libadwaita-1.so.0      => /opt/gtk420/lib/x86_64-linux-gnu/libadwaita-1.so.0
+libwayland-client.so.0 => /lib/x86_64-linux-gnu/libwayland-client.so.0
+0 missing
+```
+
+Consequence: **no runtime Wayland package is needed**. Wayland 1.24 is built
+inside the GTK build container and is never installed on the user's system. The
+`new enum` is a protocol-generation concern, not a runtime ABI one. That removes
+a whole package from the shipped set and removes any risk of shadowing the
+system Wayland.
+
+The alternative — GTK with `-Dwayland-backend=false` — compiles but loses native
+Wayland, leaving Celluloid on XWayland. That was rejected.
 
 ## Measured build results (all in debian:13 containers)
 
@@ -86,18 +120,21 @@ set in the user's environment, and no `ld.so.conf` entry is required.
 
 | Package | Contents | Prefix |
 |---|---|---|
-| `libwayland-backport` | wayland 1.24 client/server libs | `/opt/wl124` |
-| `libgtk-4-1-backport` | GTK 4.20 + private wayland | `/opt/gtk420` |
+| `libgtk-4-1-backport` | GTK 4.20 | `/opt/gtk420` |
 | `libadwaita-1-0-backport` | libadwaita 1.8 | `/opt/gtk420` |
 | `celluloid` | Celluloid 0.30, rpath-linked | `/usr` |
 
-The three backports are private-prefix and therefore do not conflict with the
+Wayland 1.24 is **not** shipped: it is built inside the GTK build container only,
+because the runtime needs none of its new symbols (verified above).
+
+The two backports are private-prefix and therefore do not conflict with the
 system packages. Celluloid 0.30 for trixie then depends on them rather than on
 the system GTK.
 
 ## What this does NOT do
 
 - It does not upgrade the system GTK. Other applications keep 4.18.
+- It does not install or shadow the system Wayland.
 - It does not touch `/usr/lib`, `/usr/share/glib-2.0/schemas`, or any system
   library path.
 - It is not a Debian archive-quality backport. It is a local build for users who

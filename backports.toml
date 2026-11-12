@@ -1,0 +1,55 @@
+# Backport sources: what to build, and where.
+#
+# These are not application releases. They are the library versions Debian 13
+# does not have, built into private prefixes so no system package is replaced.
+#
+# Note: wayland 1.24 appears here but is NOT a shipped package. It is a
+# build-time dependency of GTK 4.20 only. Measurements in
+# docs/backport-design.md show GTK 4.20 imports no wayland symbol that trixie's
+# 1.23.1 lacks, so nothing of it needs to reach the user's system.
+
+[wayland]
+# GTK 4.20 needs WL_KEYBOARD_KEY_STATE_REPEATED, a 1.24 protocol enum that
+# trixie's wayland.xml does not define, so its Wayland backend cannot compile
+# without this. Build-time only: the resulting GTK binds the system runtime.
+version   = "1.24.0"
+url       = "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.24.0/downloads/wayland-1.24.0.tar.xz"
+prefix    = "/opt/wl124"
+package   = ""            # empty = build-time only, no .deb produced
+build_only = true
+meson_args = ["-Ddocumentation=false", "-Dtests=false"]
+
+[gtk]
+version   = "4.20.4"
+url       = "https://download.gnome.org/sources/gtk/4.20/gtk-4.20.4.tar.xz"
+prefix    = "/opt/gtk420"
+package   = "libgtk-4-1-backport"
+# The Wayland backend is deliberately ON: dropping it would compile but put the
+# player on XWayland, which defeats the point of the backport.
+meson_args = [
+  "-Dintrospection=disabled",
+  "-Dbuild-demos=false",
+  "-Dbuild-tests=false",
+  "-Dbuild-testsuite=false",
+  "-Dbuild-examples=false",
+  "-Ddocumentation=false",
+  "-Dmedia-gstreamer=disabled",
+  "-Dvulkan=disabled",
+  "-Dx11-backend=true",
+  "-Dwayland-backend=true",
+]
+# GTK's GSettings schemas use the same IDs and paths as the system 4.18, so
+# installing them alongside would make glib-compile-schemas fail on duplicates.
+# They are omitted; the system schemas resolve the same keys.
+skip_schemas = true
+
+[libadwaita]
+version   = "1.8.8"
+url       = "https://download.gnome.org/sources/libadwaita/1.8/libadwaita-1.8.8.tar.xz"
+prefix    = "/opt/gtk420"
+package   = "libadwaita-1-0-backport"
+meson_args = [
+  "-Dintrospection=disabled",
+  "-Dvapi=false",
+  "-Dtests=false",
+]
