@@ -1,7 +1,15 @@
 name: build packages
 
-# Builds .deb packages for every supported suite on a schedule and on demand.
-# Tag pushes attach the resulting packages to a GitHub release.
+# Builds .deb packages for every supported suite, then publishes them to the
+# repository's releases page.
+#
+#   push to a v* tag   -> a normal release for that tag
+#   push to main, or a scheduled/manual run
+#                      -> a rolling "nightly" pre-release, replaced each run
+#   pull request       -> build only, nothing is published
+#
+# The rolling release is replaced rather than updated so artifacts from older
+# upstream versions do not pile up as stale assets.
 
 on:
   push:
@@ -102,42 +110,103 @@ jobs:
           done
           ls -l out
 
+      # Record the resolved version so the release notes can state what was
+      # actually built rather than a guess. Derived from the package itself,
+      # which is the authoritative answer.
+      - name: Record built version
+        run: |
+          deb=$(ls out/*.deb | head -1)
+          version=$(dpkg-deb -f "$deb" Version)
+          printf '%s\t%s\n' "${{ matrix.suite }}" "$version" > out/version.tsv
+          echo "built: ${{ matrix.suite }} $version"
+
       - uses: actions/upload-artifact@v4
         with:
           name: celluloid-${{ matrix.suite }}
-          path: out/*.deb
+          path: out/*
           if-no-files-found: error
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Publishing happens only from the default branch or a tag. Pull requests
+    # and arbitrary branches are excluded on purpose: a fork's PR must not be
+    # able to write assets into this repository.
+    if: |
+      !cancelled() && needs.build.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Flatten artifacts
+      - name: Collect packages and build release notes
+
         run: |
           mkdir -p packages
           find artifacts -name '*.deb' -exec cp {} packages/ \;
-          ls -l packages
 
-      - name: Publish
+          # The versions come from each build job, so the notes state what was
+          # actually built rather than what was expected.
+          echo "| Suite | Version | File |" > release-notes.md
+          echo "|---|---|---|" >> release-notes.md
+          for tsv in artifacts/celluloid-*/version.tsv; do
+            [ -e "$tsv" ] || continue
+            suite=$(cut -f1 "$tsv")
+            version=$(cut -f2 "$tsv")
+            file=$(basename "$(ls packages/*_"$suite"_*.deb | head -1)")
+            printf '| %s | %s | `%s` |\n' "$suite" "$version" "$file" >> release-notes.md
+          done
+
+          cat >> release-notes.md <<'EOF'
+
+          Built from the official upstream Celluloid release tarballs, each in a
+          container for the target Debian release so the binaries link against
+          the libraries that release actually ships.
+
+          Install with:
+
+          ```sh
+          sudo apt install ./<file>.deb
+          ```
+
+          These are unofficial local rebuilds, not Debian archive packages.
+          EOF
+
+          cat release-notes.md
+
+      # A rolling release is deleted and recreated rather than updated: assets
+      # from an older upstream version would otherwise linger as stale files
+      # next to the current ones.
+      #
+      # `gh release delete` exits 1 with "release not found" on the first run,
+      # which is not an error here, so the failure is tolerated explicitly.
+      - name: Remove previous nightly release
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release delete nightly --yes --cleanup-tag
+            echo "removed previous nightly release"
+          else
+            echo "no previous nightly release; nothing to remove"
+          fi
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: packages/*.deb
+          fail_on_unmatched_files: true
+          # For a v* tag push the tag already exists, so it is reused as-is.
+          # Otherwise publish a rolling pre-release named "nightly".
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || 'nightly build' }}
-          body: |
-            Celluloid packages built from official upstream release tarballs.
-
-            | Suite | Version |
-            |---|---|
-            | bookworm (12) | newest release buildable with GTK 4.8 / libadwaita 1.2 |
-            | trixie (13) | newest release buildable with GTK 4.18 / libadwaita 1.7 |
-            | sid | newest upstream release |
-
-            Install with `sudo apt install ./<file>.deb`.
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Nightly build' }}
+          body_path: release-notes.md
           draft: false
           prerelease: ${{ github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' }}
+

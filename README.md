@@ -77,6 +77,18 @@ inside a plain container: slower, but it still works.
 
 ## Installing the result
 
+Built packages are published to the repository's
+[releases page](https://github.com/souhaiebtar/celluloid-deb/releases), so you
+can download them without building anything:
+
+- **A `v*` tag push** produces a normal release for that tag.
+- **A push to `main`**, a weekly schedule, or a manual run produces a rolling
+  **`nightly`** pre-release, replaced on each run so stale assets do not
+  accumulate.
+- **Pull requests** build but never publish.
+
+Or build locally and install from `dist/`:
+
 ```bash
 sudo apt install ./dist/trixie/celluloid_0.29-1~trixie_amd64.deb
 ```
