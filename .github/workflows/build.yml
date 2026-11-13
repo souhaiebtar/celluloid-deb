@@ -271,11 +271,32 @@ jobs:
           files: packages/*.deb
           fail_on_unmatched_files: true
           # For a v* tag push the tag already exists, so it is reused as-is.
-          # Otherwise publish a rolling pre-release named "nightly".
+          # Otherwise publish a rolling release named "nightly".
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}
           name: ${{ github.ref_type == 'tag' && github.ref_name || 'Nightly build' }}
           body_path: release-notes.md
           draft: false
-          prerelease: ${{ github.ref_type != 'tag' }}
-          make_latest: ${{ github.ref_type == 'tag' }}
+          # The rolling release is NOT a pre-release. GitHub only shows a
+          # non-prerelease as "Latest" on the repository page, and a
+          # pre-release left the front page advertising a stale tag's assets
+          # while the current build sat in a release nobody looked at.
+          prerelease: false
+          make_latest: true
+
+      # Older releases keep their own assets, which go stale as upstream moves
+      # on. Remove superseded Celluloid packages from them so there is exactly
+      # one place to get a current build: the rolling release above.
+      - name: Prune stale assets from older releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ "${{ github.ref_type }}" = "tag" ] && exit 0
+          for tag in $(gh release list --limit 50 --json tagName,isLatest \
+                         --jq '.[] | select(.isLatest | not) | .tagName'); do
+            for asset in $(gh release view "$tag" --json assets \
+                             --jq '.assets[].name' | grep '^celluloid_'); do
+              echo "removing $asset from $tag (superseded)"
+              gh release delete-asset "$tag" "$asset" --yes || true
+            done
+          done
 
