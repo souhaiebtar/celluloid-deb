@@ -242,28 +242,17 @@ jobs:
 
           cat release-notes.md
 
-      # A rolling release is deleted and recreated rather than updated: assets
-      # from an older upstream version would otherwise linger as stale files
-      # next to the current ones.
-      #
-      # Deletion is best-effort and retried: if it silently no-ops (as it did
-      # once, leaving an old 0.29 asset next to the new 0.30 one), the publish
-      # step below still replaces assets by name, so only assets that no longer
-      # exist in this run are stale.
-      - name: Remove previous nightly release
+      # Assets are replaced by name on upload, so deleting the old release is not
+      # required for correctness. It is attempted only to drop assets that no
+      # longer exist in this run, and failure is tolerated: in CI the delete
+      # has failed transiently before, and the publish step below still
+      # produced a correct release.
+      - name: Remove previous rolling release
         if: github.ref_type != 'tag'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for attempt in 1 2 3; do
-            if gh release delete nightly --yes --cleanup-tag 2>/dev/null; then
-              echo "removed previous nightly release"
-              exit 0
-            fi
-            echo "attempt $attempt: nightly release not removed yet"
-            sleep 2
-          done
-          echo "no previous nightly release, or it could not be removed; continuing"
+        run: gh release delete nightly --yes --cleanup-tag || echo "could not remove; publish will overwrite by name"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
